@@ -1,0 +1,1 @@
+pyinstaller.exe -y .\gamepad_stats.py

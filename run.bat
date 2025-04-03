@@ -1,0 +1,1 @@
+.\dist\gamepad_stats\gamepad_stats.exe
