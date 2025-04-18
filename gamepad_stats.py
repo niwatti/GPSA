@@ -14,6 +14,7 @@ JOYSTICK_HIST_STEPS = 32
 
 def prepare():
     os.system('cls' if os.name == 'nt' else 'clear')
+    os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"    #get key events while the window are not focused
     print()
     print(f" ____    ____    ____    ______     ")
     print(f"/\  _`\ /\  _`\ /\  _`\ /\  _  \    ")
