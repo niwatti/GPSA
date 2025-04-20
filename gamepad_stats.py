@@ -15,9 +15,8 @@ import math
 import numpy as np
 
 import csv
-import pprint
 
-version = "0.2"
+version = "0.3"
 
 # MEASURE Thread FPS
 MEASURE_FRAME_RATE = 120
