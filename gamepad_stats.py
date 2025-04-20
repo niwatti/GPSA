@@ -616,6 +616,8 @@ def recorder_mode_measure(joystick, stats, cur_ms, writer):
     lx, ly, rx, ry, ts = measure_stats(joystick, stats, cur_ms, 1000)
     writer.writerow([ts, cur_ms, lx, ly, rx, ry])
 
+def gui_mode_measure(joystick, stats, cur_ms, fd):
+    measure_stats(joystick, stats, cur_ms, 1000)
 
 def stick_mode_measure(joystick, stats, cur_ms, fd):
     measure_stats(joystick, stats, cur_ms, 10000)
@@ -662,7 +664,7 @@ def realtime_gui(screen, joystick, stop_event, change_event):
     visualization_thread = Thread(target=recorder_mode_visualize, args=(screen, joystick, stats, stop_event, change_event))
     visualization_thread.start()
         
-    measure(recorder_mode_measure, joystick, stats, stop_event, change_event)
+    measure(gui_mode_measure, joystick, stats, stop_event, change_event)
     if visualization_thread:
         visualization_thread.join()
 
@@ -756,7 +758,7 @@ def main():
     if args.gui:
         init_pygame(realtime_gui, 360, 160, True)
     elif args.record:
-        init_pygame(recorder_with_gui, 360, 160, False)
+        init_pygame(recorder_with_gui, 360, 160, True)
     else:
         init_pygame(stick_analyzer, 1100, 450, False)
 
