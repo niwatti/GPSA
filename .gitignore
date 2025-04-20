@@ -3,6 +3,8 @@ __pycache__/
 build/
 dist/
 
+*.gpsa
+
 *.manifest
 *.spec
 pip-log.txt
