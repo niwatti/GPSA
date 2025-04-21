@@ -552,11 +552,11 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         sum_vec_l = 0
         sum_vec_r = 0
         for idx, stat in enumerate(stats["timestamps"]):
-            # could be deleted by another thread
-            if len(stats["lx"]) <= idx or len(stats["ly"]) <= idx or len(stats["rx"]) <= idx or len(stats["ry"] <= idx):
-                continue
-
             try:
+                # could be deleted by another thread
+                if len(stats["lx"]) <= idx or len(stats["ly"]) <= idx or len(stats["rx"]) <= idx or len(stats["ry"]) <= idx:
+                    continue
+
                 vector_size_l = np.sqrt(np.square(stats["lx"][idx]) + np.square(stats["ly"][idx]**2))
                 vector_size_r = np.sqrt(np.square(stats["rx"][idx]) + np.square(stats["ry"][idx]**2))
                 sum_vec_l += vector_size_l
