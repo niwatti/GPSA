@@ -334,7 +334,7 @@ def draw_history_lines(screen, stat_x, stat_y, center_x, center_y, font, guide_r
 def draw_history_line(screen, stat, top, left, width, height, transparent=False, horizontal=True):
     # Draw Area
     if not transparent:
-        pygame.draw.rect(screen, (200, 200, 200), (left, top, width, height))
+        pygame.draw.rect(screen, (50, 50, 50), (left, top, width, height))
 
     x_count = len(stat)
     last_pos = (left + width, top + height - ((- stat[0] + 1) / 2) * height)
@@ -350,10 +350,58 @@ def draw_history_line(screen, stat, top, left, width, height, transparent=False,
         else:
             new_pos = (left + width - ((-val + 1)/ 2) * width, top + height - (idx / x_count) * height)
 
-        pygame.draw.line(screen, (50, 50, 50), last_pos, new_pos)
+        pygame.draw.line(screen, (200, 200, 200), last_pos, new_pos)
         last_pos = new_pos
 
+def draw_max_dist_speed(screen, font, center_x, center_y, line_dist, stat, timestamps):
+    ''' Calculates max stick speed of the max distance in stat.
+    '''
 
+    direction = 0
+    max_distance = 0
+    max_time = 0
+    max_sum_of_pos = 0
+    max_count = 0
+    count = 0
+    sum_of_pos = 0
+    begin_pos = stat[0]
+    begin_ms = timestamps[0]
+    for idx, val in enumerate(stat):
+        if idx <= 0:
+            continue
+        delta_ms = timestamps[idx] - begin_ms
+        delta = stat[idx] - stat[idx - 1]
+        cur_distance = abs(stat[idx] - begin_pos)
+
+        cur_direction = 0
+        if delta < 0:
+            cur_direction = -1
+        elif delta > 0:
+            cur_direction = 1
+        else:
+            cur_direction = 0
+
+        if direction == cur_direction:
+            sum_of_pos += abs(stat[idx])
+            count += 1
+            if max_distance < cur_distance and delta_ms > 0:
+                max_distance = cur_distance
+                max_time = delta_ms
+                max_sum_of_pos = sum_of_pos
+                max_count = count
+        else:
+            direction = cur_direction
+            begin_pos = stat[idx]
+            begin_ms = timestamps[idx]
+            sum_of_pos = 0
+            count = 0
+
+    if max_time > 0:
+        plot_txt(screen, font, f'd: {max_distance:.5f}', center = (center_x, center_y))
+        plot_txt(screen, font, f'S:{max_sum_of_pos:.0f}, S/s:{max_sum_of_pos / max_time * 1000:.0f}', center = (center_x, center_y + line_dist))
+    else:
+        plot_txt(screen, font, f'd: {max_distance:.5f}', center = (center_x, center_y))
+        plot_txt(screen, font, f'S:{max_sum_of_pos:.0f}, S/s:{0}', center = (center_x, center_y + line_dist))
 
 
 def stick_mode_visualize(screen, joystick, stats, stop_event, change_event):
@@ -535,6 +583,14 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         cur_ms = pygame.time.get_ticks()
         plot_txt(screen, font_avg, f'{cur_ms}', midright = (450, 240))
 
+        # Draws history lines of the sticks
+        #   LEFT
+        draw_history_line(screen, stats["lx"], center_left[1] + guide_radius, center_left[0] - guide_radius, guide_radius * 2, 100, True, False)
+        draw_history_line(screen, stats["ly"], center_left[1] - guide_radius, center_left[0] + guide_radius, 100, guide_radius * 2, True, True)
+        #   RIGHT
+        draw_history_line(screen, stats["rx"], center_right[1] + guide_radius, center_right[0] - guide_radius, guide_radius * 2, 100, True, False)
+        draw_history_line(screen, stats["ry"], center_right[1] - guide_radius, center_right[0] + guide_radius, 100, guide_radius * 2, True, True)
+
         # Get current positions of the sticks
         lx = fix_stick_val(joystick.get_axis(0))
         ly = fix_stick_val(joystick.get_axis(1))
@@ -545,24 +601,18 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         #   LEFT
         left_stick_position = (center_left[0] + int(lx * guide_radius), center_left[1] + int(ly * guide_radius))
         pygame.draw.circle(screen, (255, 255, 255), left_stick_position, 3)
-        ## do not show numbers
-        #plot_txt(screen, font_avg, f'{lx:.5f}', center = (center_left[0], center_left[1] + first_line_dist))
-        #plot_txt(screen, font_avg, f'{ly:.5f}', center =(center_left[0] + guide_radius + x_first_line_dist, center_left[1]))
+        plot_txt(screen, font_avg, f'{lx:.5f}', center = (center_left[0], center_left[1] + first_line_dist))
+        plot_txt(screen, font_avg, f'{ly:.5f}', center =(center_left[0] + guide_radius + x_first_line_dist, center_left[1]))
+        draw_max_dist_speed(screen, font_avg, center_left[0], center_left[1] + first_line_dist + line_dist, line_dist, stats["lx"], stats["timestamps"])
+        draw_max_dist_speed(screen, font_avg, center_left[0] + guide_radius + x_first_line_dist, center_left[1] + line_dist, line_dist, stats["ly"], stats["timestamps"])
 
         #   RIGHT
         right_stick_position = (center_right[0] + int(rx * guide_radius), center_right[1] + int(ry * guide_radius))
         pygame.draw.circle(screen, (255, 255, 255), right_stick_position, 3)
-        ## do not show numbers
-        #plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
-        #plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
-
-        # Draws history lines of the sticks
-        #   LEFT
-        draw_history_line(screen, stats["lx"], center_left[1] + guide_radius, center_left[0] - guide_radius, guide_radius * 2, 100, True, False)
-        draw_history_line(screen, stats["ly"], center_left[1] - guide_radius, center_left[0] + guide_radius, 100, guide_radius * 2, True, True)
-        #   RIGHT
-        draw_history_line(screen, stats["rx"], center_right[1] + guide_radius, center_right[0] - guide_radius, guide_radius * 2, 100, True, False)
-        draw_history_line(screen, stats["ry"], center_right[1] - guide_radius, center_right[0] + guide_radius, 100, guide_radius * 2, True, True)
+        plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
+        plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
+        draw_max_dist_speed(screen, font_avg, center_right[0], center_right[1] + first_line_dist + line_dist, line_dist, stats["rx"], stats["timestamps"])
+        draw_max_dist_speed(screen, font_avg, center_right[0] + guide_radius + x_first_line_dist, center_right[1] + line_dist, line_dist, stats["ry"], stats["timestamps"])
 
         # 1s Sum of Vector Size
         sum_vec_l = 0
