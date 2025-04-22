@@ -322,31 +322,37 @@ def draw_history_lines(screen, stat_x, stat_y, center_x, center_y, font, guide_r
     left = center_x + guide_radius + 20
     x_top = center_y + first_line_dist - 30
     y_top = x_top + line_dist * 4.5
-    width = 80
+    height = 80
 
+    draw_history_line(screen, stat_x, x_top, left, guide_radius * 2, height)
+    draw_history_line(screen, stat_y, y_top, left, guide_radius * 2, height)
+
+    plot_txt(screen, font, f'X', center=(left - 5, x_top + height / 2))
+    plot_txt(screen, font, f'Y', center=(left - 5, y_top + height / 2))
+
+
+def draw_history_line(screen, stat, top, left, width, height, transparent=False, horizontal=True):
     # Draw Area
-    pygame.draw.rect(screen, (200, 200, 200), (left, x_top, guide_radius * 2, width)) #X
-    pygame.draw.rect(screen, (200, 200, 200), (left, y_top, guide_radius * 2, width)) #Y
-    
-    # Labels
-    plot_txt(screen, font, f'X', center=(left - 5, x_top + width / 2))
-    plot_txt(screen, font, f'Y', center=(left - 5, y_top + width / 2))
+    if not transparent:
+        pygame.draw.rect(screen, (200, 200, 200), (left, top, width, height))
 
-    x_count = len(stat_x)
-    last_pos = (left, x_top + 10)
-    #print(stat_x)
-    for idx, x in enumerate(stat_x):
+    x_count = len(stat)
+    last_pos = (left + width, top + height - ((- stat[0] + 1) / 2) * height)
+    if not horizontal:
+        last_pos = (left + width - ((- stat[0] + 1) / 2) * width, top + height)
+
+    # Draw Line
+    for idx, val in enumerate(stat):
         # idx: 0 -> (count - 1)
-        new_pos = (left + (idx / x_count) * guide_radius * 2, x_top + width - ((x + 1)/ 2) * width)
-        pygame.draw.line(screen, (100, 100, 100), last_pos, new_pos)
+        new_pos = (0, 0)
+        if horizontal:
+            new_pos = (left + width - (idx / x_count) * width, top + height - ((-val + 1)/ 2) * height)
+        else:
+            new_pos = (left + width - ((-val + 1)/ 2) * width, top + height - (idx / x_count) * height)
+
+        pygame.draw.line(screen, (50, 50, 50), last_pos, new_pos)
         last_pos = new_pos
 
-    y_count = len(stat_y)
-    last_pos = (left, y_top + 10)
-    for idx, y in enumerate(stat_y):
-        new_pos = (left + (idx / y_count) * guide_radius * 2, y_top + width - (((y + 1) / 2) * width))
-        pygame.draw.line(screen, (100, 100, 100), last_pos, new_pos)
-        last_pos = new_pos
 
 
 
@@ -512,7 +518,7 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
     font_label = pygame.font.Font(None, 16)
     font_avg = pygame.font.Font(None, 18)
     center_left = (70, 70)
-    center_right = (250, 70)
+    center_right = (300, 70)
     guide_radius = 50
     line_dist = 20
     first_line_dist = 60
@@ -523,11 +529,11 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         screen.fill((128, 128, 128))
 
         # draw water mark
-        plot_txt(screen, font_label, 'GPSA by monoru', True, (255, 255, 255), 145, midright = (350, 10))
+        plot_txt(screen, font_label, 'GPSA by monoru', True, (255, 255, 255), 145, midright = (450, 10))
 
         # draw timestamp
         cur_ms = pygame.time.get_ticks()
-        plot_txt(screen, font_avg, f'{cur_ms}', midright = (350, 140))
+        plot_txt(screen, font_avg, f'{cur_ms}', midright = (450, 240))
 
         # Get current positions of the sticks
         lx = fix_stick_val(joystick.get_axis(0))
@@ -539,14 +545,24 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         #   LEFT
         left_stick_position = (center_left[0] + int(lx * guide_radius), center_left[1] + int(ly * guide_radius))
         pygame.draw.circle(screen, (255, 255, 255), left_stick_position, 3)
-        plot_txt(screen, font_avg, f'{lx:.5f}', center = (center_left[0], center_left[1] + first_line_dist))
-        plot_txt(screen, font_avg, f'{ly:.5f}', center =(center_left[0] + guide_radius + x_first_line_dist, center_left[1]))
+        ## do not show numbers
+        #plot_txt(screen, font_avg, f'{lx:.5f}', center = (center_left[0], center_left[1] + first_line_dist))
+        #plot_txt(screen, font_avg, f'{ly:.5f}', center =(center_left[0] + guide_radius + x_first_line_dist, center_left[1]))
 
         #   RIGHT
         right_stick_position = (center_right[0] + int(rx * guide_radius), center_right[1] + int(ry * guide_radius))
         pygame.draw.circle(screen, (255, 255, 255), right_stick_position, 3)
-        plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
-        plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
+        ## do not show numbers
+        #plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
+        #plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
+
+        # Draws history lines of the sticks
+        #   LEFT
+        draw_history_line(screen, stats["lx"], center_left[1] + guide_radius, center_left[0] - guide_radius, guide_radius * 2, 100, True, False)
+        draw_history_line(screen, stats["ly"], center_left[1] - guide_radius, center_left[0] + guide_radius, 100, guide_radius * 2, True, True)
+        #   RIGHT
+        draw_history_line(screen, stats["rx"], center_right[1] + guide_radius, center_right[0] - guide_radius, guide_radius * 2, 100, True, False)
+        draw_history_line(screen, stats["ry"], center_right[1] - guide_radius, center_right[0] + guide_radius, 100, guide_radius * 2, True, True)
 
         # 1s Sum of Vector Size
         sum_vec_l = 0
@@ -759,9 +775,9 @@ def main():
     '''
     args = parse_args()
     if args.gui:
-        init_pygame(realtime_gui, 360, 160, True)
+        init_pygame(realtime_gui, 460, 250, True)
     elif args.record:
-        init_pygame(recorder_with_gui, 360, 160, True)
+        init_pygame(recorder_with_gui, 460, 250, True)
     else:
         init_pygame(stick_analyzer, 1100, 450, False)
 
