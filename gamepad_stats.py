@@ -757,7 +757,7 @@ def measure(measure_func, joystick, stats, stop_event, change_event, record = Fa
 
     if (record):
         dt = datetime.datetime.now()
-        filename = dt.strftime("%Y%m%d_%H%M%S_%f.gpsa")
+        filename = dt.strftime("%Y%m%d_%H%M%S_%f.csv")
         with open(filename, 'w') as fd:
             writer = csv.writer(fd)
             measure_main_loop(measure_func, joystick, stats, stop_event, change_event, writer)
