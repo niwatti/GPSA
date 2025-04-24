@@ -24,6 +24,8 @@ MEASURE_FRAME_RATE = 120
 # JOYSTICK Step Accuracy, HISTOGRAM BINS for calculating mode
 JOYSTICK_HIST_STEPS = 32
 
+BUTTONS_MAP = {'A': 0, 'B': 1, 'X': 2, 'Y': 3, 'SELECT': 4, 'HOME': 5, 'START': 6, 'LS': 7, 'RS': 8, 'LB': 9, 'RB': 10, 'UP': 11, 'DOWN': 12, 'LEFT': 13, 'RIGHT': 14, 'TOUCHPAD': 15}
+
 def prepare():
     os.system('cls' if os.name == 'nt' else 'clear')
     os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"    #get key events while the window is not focused
@@ -250,8 +252,9 @@ def plot_txt(screen, font, text, antialias = True, color = (255, 255, 255), tran
 def fix_stick_val(val):
     if 0 < val:
         return (math.ceil(val * 100000) / 100000 + 0.00001) / 0.99998
-    else:
+    elif val < 0:
         return (math.floor(val * 100000) / 100000 + 0.00002) / 0.99998
+    return val
 
 def calc_color(rate):
     # |        LB         |         B         |         DB     |            DG          |         G         |           GY        |           Y         |           O         |          R        |          P         |
@@ -332,6 +335,9 @@ def draw_history_lines(screen, stat_x, stat_y, center_x, center_y, font, guide_r
 
 
 def draw_history_line(screen, stat, top, left, width, height, transparent=False, horizontal=True):
+    if len(stat) <= 0:
+        return
+
     # Draw Area
     if not transparent:
         pygame.draw.rect(screen, (50, 50, 50), (left, top, width, height))
@@ -363,58 +369,62 @@ def calc_max_dist_speed(stat, timestamps):
     max_count = 0
     count = 0
     sums_of_pos = {
-        "sum": 0,
         "minus": 0,
         "plus": 0
     }
-    max_sums_of_pos = {
-        "sum": 0,
-        "minus": 0,
-        "plus": 0
-    }
-    begin_pos = stat[0]
-    begin_ms = timestamps[0]
-    for idx, val in enumerate(stat):
-        if idx <= 0:
-            continue
-        delta_ms = timestamps[idx] - begin_ms
-        delta = stat[idx] - stat[idx - 1]
-        cur_distance = abs(stat[idx] - begin_pos)
+    avg_pos = 0
 
-        cur_direction = 0
-        if delta < 0:
-            cur_direction = -1
-        elif delta > 0:
-            cur_direction = 1
-        else:
+    if len(stat) <= 0:
+        return {
+            "pos": avg_pos,
+            "distance": max_distance,
+            "time": max_time
+        }
+
+    try:
+        begin_pos = stat[0]
+        begin_ms = timestamps[0]
+        for idx, val in enumerate(stat):
+            if idx <= 0:
+                continue
+            delta_ms = timestamps[idx] - begin_ms
+            delta = stat[idx] - stat[idx - 1]
+            cur_distance = abs(stat[idx] - begin_pos)
+
             cur_direction = 0
-
-        if direction == cur_direction:
-            sums_of_pos["sum"] += stat[idx]
-            if stat[idx] < 0:
-                sums_of_pos["minus"] += stat[idx]
+            if delta < 0:
+                cur_direction = -1
+            elif delta > 0:
+                cur_direction = 1
             else:
-                sums_of_pos["plus"] += stat[idx]
+                pass
 
-            count += 1
-            if max_distance < cur_distance and delta_ms > 0:
-                max_distance = cur_distance
-                max_time = delta_ms
-                max_sums_of_pos["sum"] = sums_of_pos["sum"]
-                max_sums_of_pos["minus"] = sums_of_pos["minus"]
-                max_sums_of_pos["plus"] = sums_of_pos["plus"]
-                max_count = count
-        else:
-            direction = cur_direction
-            begin_pos = stat[idx]
-            begin_ms = timestamps[idx]
-            sums_of_pos["sum"] = 0
-            sums_of_pos["minus"] = 0
-            sums_of_pos["plus"] = 0
-            count = 0
+            if direction == cur_direction:
+                if stat[idx] < 0:
+                    sums_of_pos["minus"] += stat[idx] * delta
+                else:
+                    sums_of_pos["plus"] += stat[idx] * delta
 
+                count += 1
+                if max_distance < cur_distance and delta_ms > 0:
+                    max_distance = cur_distance
+                    max_time = delta_ms
+                    max_count = count
+                    avg_pos = max(abs(sums_of_pos["minus"]), abs(sums_of_pos["plus"])) / max_time * 1000
+            else:
+                direction = cur_direction
+                begin_pos = stat[idx]
+                begin_ms = timestamps[idx]
+                sums_of_pos["minus"] = 0
+                sums_of_pos["plus"] = 0
+                count = 0
+    except Exception as e:
+        #just ignore thread race errors
+        print(e)
+        pass
+    
     return {
-        "pos": max_sums_of_pos,
+        "avg": avg_pos,
         "distance": max_distance,
         "time": max_time
     }
@@ -424,11 +434,11 @@ def draw_max_dist_speed(screen, font, center_x, center_y, line_dist, stat):
         return
 
     if stat["time"] > 0:
-        plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y))
-        plot_txt(screen, font, f'S:{stat["pos"]["sum"]:.0f}({stat["pos"]["minus"]:.0f}->{stat["pos"]["plus"]:.0f}), S/s:{stat["pos"]["sum"] / stat["time"] * 1000:.0f}', center = (center_x, center_y + line_dist))
+        plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/s, {stat["time"]}ms', center = (center_x, center_y))
+        #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
     else:
-        plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y))
-        plot_txt(screen, font, f'S:{stat["pos"]["sum"]:.0f}({stat["pos"]["minus"]:.0f}->{stat["pos"]["plus"]:.0f}), S/s:{0}', center = (center_x, center_y + line_dist))
+        plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/s, 0ms', center = (center_x, center_y))
+        #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
 
 
 def stick_mode_visualize(screen, joystick, stats, stop_event, change_event):
@@ -698,31 +708,44 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
     ly = fix_stick_val(joystick.get_axis(1))
     rx = fix_stick_val(joystick.get_axis(2))
     ry = fix_stick_val(joystick.get_axis(3))
+    lt = fix_stick_val(joystick.get_axis(4))
+    rt = fix_stick_val(joystick.get_axis(5))
 
     stats["timestamps"].append(cur_ms)
     stats["lx"].append(lx)
     stats["ly"].append(ly)
     stats["rx"].append(rx)
     stats["ry"].append(ry)
+    stats["lt"].append(lt)
+    stats["rt"].append(rt)
 
     stats["max"]["lx"] = calc_max_dist_speed(stats["lx"], stats["timestamps"])
     stats["max"]["ly"] = calc_max_dist_speed(stats["ly"], stats["timestamps"])
     stats["max"]["rx"] = calc_max_dist_speed(stats["rx"], stats["timestamps"])
     stats["max"]["ry"] = calc_max_dist_speed(stats["ry"], stats["timestamps"])
 
-    result = [lx, ly, rx, ry, dt.isoformat()]
+    result = [dt.isoformat(), lx, ly, rx, ry, lt, rt]
     for key in ["lx", "ly", "rx", "ry"]:
         result.append(stats["max"][key]["time"])
         result.append(stats["max"][key]["distance"])
-        result.append(stats["max"][key]["pos"]["sum"])
-        result.append(stats["max"][key]["pos"]["minus"])
-        result.append(stats["max"][key]["pos"]["plus"])
+        result.append(stats["max"][key]["avg"])
+
+    for i in range(joystick.get_numbuttons()):
+        btn_state = joystick.get_button(i)
+        if i not in stats["buttons"]:
+            stats["buttons"].append([])
+        if btn_state:
+            result.append(1)
+            stats["buttons"][i].append(1)
+        else:
+            result.append(0)
+            stats["buttons"][i].append(0)
 
     return result
 
 def recorder_mode_measure(joystick, stats, cur_ms, writer):
-    lx, ly, rx, ry, ts, *maxes = measure_stats(joystick, stats, cur_ms, 1000)
-    writer.writerow([ts, cur_ms, lx, ly, rx, ry, *maxes])
+    result = measure_stats(joystick, stats, cur_ms, 1000)
+    writer.writerow([cur_ms, *result])
 
 def gui_mode_measure(joystick, stats, cur_ms, fd):
     measure_stats(joystick, stats, cur_ms, 1000)
@@ -768,12 +791,14 @@ def realtime_gui(screen, joystick, stop_event, change_event):
     stats = {
         "timestamps": [],
         "lx": [], "ly": [], "rx": [], "ry": [],
+        "lt": [], "rt": [],
         "max": {
             "lx": {},
             "ly": {},
             "rx": {},
             "ry": {}
-        }
+        },
+        "buttons": []
     }
 
     visualization_thread = None
@@ -801,12 +826,14 @@ def recorder(screen, joystick, stop_event, change_event, with_gui):
     stats = {
         "timestamps": [],
         "lx": [], "ly": [], "rx": [], "ry": [],
+        "lt": [], "rt": [],
         "max": {
             "lx": {},
             "ly": {},
             "rx": {},
             "ry": {}
-        }
+        },
+        "buttons": []
     }
 
     visualization_thread = None
@@ -827,12 +854,14 @@ def stick_analyzer(screen, joystick, stop_event, change_event):
     stats = {
         "timestamps": [],
         "lx": [], "ly": [], "rx": [], "ry": [],
+        "lt": [], "rt": [],
         "max": {
             "lx": {},
             "ly": {},
             "rx": {},
             "ry": {}
-        }
+        },
+        "buttons": []
     }
     visualization_thread = Thread(target=stick_mode_visualize, args=(screen, joystick, stats, stop_event, change_event))
     visualization_thread.start()
