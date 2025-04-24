@@ -824,7 +824,7 @@ def recorder_without_gui(screen, joystick, stop_event, change_event, stats):
     '''
     recorder(screen, joystick, stop_event, change_event, False, stats)
 
-def recorder(screen, joystick, stop_event, change_event, stats, with_gui):
+def recorder(screen, joystick, stop_event, change_event, with_gui, stats):
 
     visualization_thread = None
     
