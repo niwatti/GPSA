@@ -784,7 +784,7 @@ def measure_main_loop(measure_func, joystick, stats, stop_event, change_event, w
         clock.tick(MEASURE_FRAME_RATE)
 
         # Calculating FPS
-        if last_ms > 0:
+        if cur_ms - last_ms > 0:
             stats["fps"] = 1000 / (cur_ms - last_ms)
         else:
             stats["fps"] = 0
