@@ -619,6 +619,7 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         # draw timestamp
         cur_ms = pygame.time.get_ticks()
         plot_txt(screen, font_avg, f'{cur_ms}', midright = (450, 240))
+        plot_txt(screen, font_avg, f'{stats["fps"]:.0f}', topright = (450, 20))
 
         # Draws history lines of the sticks
         #   LEFT
@@ -694,14 +695,18 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         clock.tick(60)
 
 def measure_stats(joystick, stats, cur_ms, max_ms):
-    while len(stats["timestamps"]) > 0:
-        if cur_ms - stats["timestamps"][0] <= max_ms:
+    below_max_index = -1
+    for i in range(len(stats["timestamps"])):
+        if cur_ms - stats["timestamps"][i] <= max_ms:
             break
-        del stats["timestamps"][0]
-        del stats["lx"][0]
-        del stats["ly"][0]
-        del stats["rx"][0]
-        del stats["ry"][0]
+        below_max_index = i
+
+    if below_max_index >= 0:
+        del stats["timestamps"][:below_max_index]
+        del stats["lx"][:below_max_index]
+        del stats["ly"][:below_max_index]
+        del stats["rx"][:below_max_index]
+        del stats["ry"][:below_max_index]
 
     dt = datetime.datetime.now()
     lx = fix_stick_val(joystick.get_axis(0))
@@ -731,9 +736,9 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
         result.append(stats["max"][key]["avg"])
 
     for i in range(joystick.get_numbuttons()):
+        del stats["buttons"][i][:below_max_index]
+
         btn_state = joystick.get_button(i)
-        if i not in stats["buttons"]:
-            stats["buttons"].append([])
         if btn_state:
             result.append(1)
             stats["buttons"][i].append(1)
@@ -756,6 +761,8 @@ def stick_mode_measure(joystick, stats, cur_ms, fd):
 def measure_main_loop(measure_func, joystick, stats, stop_event, change_event, writer = None):
     clock = pygame.time.Clock()
 
+    last_ms = pygame.time.get_ticks()
+
     while not stop_event.is_set() and not change_event.is_set():
         quit_event = pygame.event.get(pygame.QUIT)
         if quit_event:
@@ -776,6 +783,14 @@ def measure_main_loop(measure_func, joystick, stats, stop_event, change_event, w
         # Wait until next measure frame
         clock.tick(MEASURE_FRAME_RATE)
 
+        # Calculating FPS
+        if last_ms > 0:
+            stats["fps"] = 1000 / (cur_ms - last_ms)
+        else:
+            stats["fps"] = 0
+
+        last_ms = cur_ms
+
 def measure(measure_func, joystick, stats, stop_event, change_event, record = False):
 
     if (record):
@@ -787,20 +802,7 @@ def measure(measure_func, joystick, stats, stop_event, change_event, record = Fa
     else:
         measure_main_loop(measure_func, joystick, stats, stop_event, change_event)    
 
-def realtime_gui(screen, joystick, stop_event, change_event):
-    stats = {
-        "timestamps": [],
-        "lx": [], "ly": [], "rx": [], "ry": [],
-        "lt": [], "rt": [],
-        "max": {
-            "lx": {},
-            "ly": {},
-            "rx": {},
-            "ry": {}
-        },
-        "buttons": []
-    }
-
+def realtime_gui(screen, joystick, stop_event, change_event, stats):
     visualization_thread = None
     
     visualization_thread = Thread(target=recorder_mode_visualize, args=(screen, joystick, stats, stop_event, change_event))
@@ -810,31 +812,19 @@ def realtime_gui(screen, joystick, stop_event, change_event):
     if visualization_thread:
         visualization_thread.join()
 
-def recorder_with_gui(screen, joystick, stop_event, change_event):
+def recorder_with_gui(screen, joystick, stop_event, change_event, stats):
     '''
         RECORDER with GUI
     '''
-    recorder(screen, joystick, stop_event, change_event, True)
+    recorder(screen, joystick, stop_event, change_event, True, stats)
 
-def recorder_without_gui(screen, joystick, stop_event, change_event):
+def recorder_without_gui(screen, joystick, stop_event, change_event, stats):
     '''
         RECORDER without GUI
     '''
-    recorder(screen, joystick, stop_event, change_event, False)
+    recorder(screen, joystick, stop_event, change_event, False, stats)
 
-def recorder(screen, joystick, stop_event, change_event, with_gui):
-    stats = {
-        "timestamps": [],
-        "lx": [], "ly": [], "rx": [], "ry": [],
-        "lt": [], "rt": [],
-        "max": {
-            "lx": {},
-            "ly": {},
-            "rx": {},
-            "ry": {}
-        },
-        "buttons": []
-    }
+def recorder(screen, joystick, stop_event, change_event, stats, with_gui):
 
     visualization_thread = None
     
@@ -846,23 +836,11 @@ def recorder(screen, joystick, stop_event, change_event, with_gui):
     if visualization_thread:
         visualization_thread.join()
 
-def stick_analyzer(screen, joystick, stop_event, change_event):
+def stick_analyzer(screen, joystick, stop_event, change_event, stats):
     '''
         STICK ANALYZER
     '''
-     
-    stats = {
-        "timestamps": [],
-        "lx": [], "ly": [], "rx": [], "ry": [],
-        "lt": [], "rt": [],
-        "max": {
-            "lx": {},
-            "ly": {},
-            "rx": {},
-            "ry": {}
-        },
-        "buttons": []
-    }
+
     visualization_thread = Thread(target=stick_mode_visualize, args=(screen, joystick, stats, stop_event, change_event))
     visualization_thread.start()
         
@@ -891,7 +869,26 @@ def init_pygame(to_run_func, width, height, transparent):
             screen = pygame.display.set_mode((width, height))
 
         pygame.display.set_caption("GPSA: Game Pad Stats Analyzer")
-        to_run_func(screen, joystick, stop_event, change_event)
+
+        #prepare stats
+        stats = {
+            "timestamps": [],
+            "lx": [], "ly": [], "rx": [], "ry": [],
+            "lt": [], "rt": [],
+            "max": {
+                "lx": {},
+                "ly": {},
+                "rx": {},
+                "ry": {}
+            },
+            "buttons": [],
+            "fps": 0
+        }
+
+        for i in range(joystick.get_numbuttons()):
+            stats["buttons"].append([])
+
+        to_run_func(screen, joystick, stop_event, change_event, stats)
 
         if stop_event.is_set():
             pygame.quit()
