@@ -361,109 +361,6 @@ def draw_history_line(screen, stat, top, left, width, height, transparent=False,
         pygame.draw.line(screen, (200, 200, 200), last_pos, new_pos)
         last_pos = new_pos
 
-def calc_max_dist_speed(stat, timestamps):
-    ''' Calculates max stick speed of the max distance in stat.
-    '''
-
-    direction = 0
-    max_distance = 0
-    time_at_stick_direction_change = 0
-    max_delta_time_from_stick_direction_change = 0
-    last_stick_direction = 0
-    count = 0
-    sums_of_pos = {
-        "minus": 0,
-        "plus": 0
-    }
-    avg_pos = 0
-
-    if len(stat) <= 0:
-        return {
-            "pos": avg_pos,
-            "distance": max_distance,
-            "time": max_delta_time_from_stick_direction_change
-        }
-
-    try:
-        begin_pos = stat[0]
-        begin_ms = timestamps[0]
-        for idx, val in enumerate(stat):
-            if idx <= 0:
-                continue
-            delta_before_ms = timestamps[idx] - timestamps[idx - 1]
-            delta = stat[idx] - stat[idx - 1]
-            cur_distance = abs(stat[idx] - begin_pos)
-
-            cur_stick_direction = 0
-            if stat[idx] < 0:
-                cur_stick_direction = -1
-            else:
-                cur_stick_direction = 1
-
-            delta_time_from_stick_direction_change = timestamps[idx] - time_at_stick_direction_change
-
-            cur_direction = 0
-            if 0 < delta: #pos before < current pos (small to large) --->
-                cur_direction = 1
-            elif delta < 0: #current pos < pos before (large to small) <---
-                cur_direction = -1
-            else:
-                pass
-
-            if direction == cur_direction or cur_direction == 0:
-                if stat[idx] < 0:
-                    sums_of_pos["minus"] += stat[idx] * delta_before_ms
-                else:
-                    sums_of_pos["plus"] += stat[idx] * delta_before_ms
-
-                count += 1
-                if max_distance <= cur_distance and delta_time_from_stick_direction_change > 0:
-                    '''
-                        strafe left to right and right is larger than 0 (--- 0 -->) or
-                        strafe right to left and left is smaller than 0 (<-- 0 ---)
-                    '''
-                    if (0 < direction and begin_pos < 0 and sums_of_pos["plus"] > 0) or \
-                       (direction < 0 and 0 < begin_pos and sums_of_pos["minus"] < 0):
-                        max_distance = cur_distance
-                        max_delta_time_from_stick_direction_change = delta_time_from_stick_direction_change
-                        if direction == 1: #pos before < current pos (small to large) 0 -->
-                            # calculating average pov speed per second
-                            # Uses sums of pos only larger than zero because it reflects how good strafe aiming is. ( /// 0 --> )
-                            avg_pos = sums_of_pos["plus"] / delta_time_from_stick_direction_change
-                        else: #current pos < pos before (large to small) <-- 0
-                            avg_pos = abs(sums_of_pos["minus"] / delta_time_from_stick_direction_change)
-
-            else:
-                direction = cur_direction
-                begin_pos = stat[idx]
-                begin_ms = timestamps[idx]
-                sums_of_pos["minus"] = 0
-                sums_of_pos["plus"] = 0
-                count = 0
-
-            if last_stick_direction != cur_stick_direction:
-                time_at_stick_direction_change = timestamps[idx]
-                last_stick_direction = cur_stick_direction
-
-    except Exception as e:
-        #just ignore thread race errors
-        print(e)
-        pass
-    
-    return {
-        "avg": avg_pos,
-        "distance": max_distance,
-        "time": max_delta_time_from_stick_direction_change
-    }
-
-def draw_max_dist_speed(screen, font, center_x, center_y, line_dist, stat):
-    if "time" not in stat:
-        return
-
-    plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/ms, {stat["time"]}ms', center = (center_x, center_y))
-    #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
-
-
 def stick_mode_visualize(screen, joystick, stats, stop_event, change_event):
     """GPSA stick mode visualize function.
     Main loop of the window drawings.
@@ -667,16 +564,12 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
         pygame.draw.circle(screen, (255, 255, 255), left_stick_position, 3)
         plot_txt(screen, font_avg, f'{lx:.5f}', center = (center_left[0], center_left[1] + first_line_dist))
         plot_txt(screen, font_avg, f'{ly:.5f}', center =(center_left[0] + guide_radius + x_first_line_dist, center_left[1]))
-        #draw_max_dist_speed(screen, font_avg, center_left[0], center_left[1] + first_line_dist + line_dist, line_dist, stats["max"]["lx"])
-        #draw_max_dist_speed(screen, font_avg, center_left[0] + guide_radius + x_first_line_dist, center_left[1] + line_dist, line_dist, stats["max"]["ly"])
 
         #   RIGHT
         right_stick_position = (center_right[0] + int(rx * guide_radius), center_right[1] + int(ry * guide_radius))
         pygame.draw.circle(screen, (255, 255, 255), right_stick_position, 3)
         plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
         plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
-        draw_max_dist_speed(screen, font_avg, center_right[0], center_right[1] + first_line_dist + line_dist, line_dist, stats["max"]["rx"])
-        #draw_max_dist_speed(screen, font_avg, center_right[0] + guide_radius + x_first_line_dist, center_right[1] + line_dist, line_dist, stats["max"]["ry"])
 
  
         # 1s Sum of Vector Size
@@ -728,9 +621,6 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
 
 def csv_file_header(joystick):
     header = ['ms_from_init', 'timestamp', 'lx', 'ly', 'rx', 'ry', 'lt', 'rt']
-    for key in ["lx", "ly", "rx", "ry"]:
-        for second_key in ["time", "distance", "avg"]:
-            header.append(f'{key}.{second_key}')
     
     for i in range(joystick.get_numbuttons()):
         header.append(f'btn.{i}')
@@ -768,16 +658,7 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
     stats["lt"].append(lt)
     stats["rt"].append(rt)
 
-    stats["max"]["lx"] = calc_max_dist_speed(stats["lx"], stats["timestamps"])
-    stats["max"]["ly"] = calc_max_dist_speed(stats["ly"], stats["timestamps"])
-    stats["max"]["rx"] = calc_max_dist_speed(stats["rx"], stats["timestamps"])
-    stats["max"]["ry"] = calc_max_dist_speed(stats["ry"], stats["timestamps"])
-
     result = [dt.isoformat(), lx, ly, rx, ry, lt, rt]
-    for key in ["lx", "ly", "rx", "ry"]:
-        result.append(stats["max"][key]["time"])
-        result.append(stats["max"][key]["distance"])
-        result.append(stats["max"][key]["avg"])
 
     for i in range(joystick.get_numbuttons()):
         del stats["buttons"][i][:below_max_index]
@@ -790,6 +671,8 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
             result.append(0)
             stats["buttons"][i].append(0)
 
+    
+    
     return result
 
 def recorder_mode_measure(joystick, stats, cur_ms, writer):
