@@ -1,1 +1,1 @@
-py gamepad_stats.py -r -p
+py gamepad_stats.py -g -p

@@ -26,6 +26,8 @@ JOYSTICK_HIST_STEPS = 32
 
 BUTTONS_MAP = {'A': 0, 'B': 1, 'X': 2, 'Y': 3, 'SELECT': 4, 'HOME': 5, 'START': 6, 'LS': 7, 'RS': 8, 'LB': 9, 'RB': 10, 'UP': 11, 'DOWN': 12, 'LEFT': 13, 'RIGHT': 14, 'TOUCHPAD': 15}
 
+PIN_ON_TOP_POS = (1920 - 460, round((1080 + 250)/ 2))
+
 def prepare():
     os.system('cls' if os.name == 'nt' else 'clear')
     os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"    #get key events while the window is not focused
@@ -365,21 +367,21 @@ def calc_max_dist_speed(stat, timestamps):
 
     direction = 0
     max_distance = 0
-    max_time = 0
+    time_at_stick_direction_change = 0
+    max_delta_time_from_stick_direction_change = 0
+    last_stick_direction = 0
     count = 0
     sums_of_pos = {
         "minus": 0,
         "plus": 0
     }
     avg_pos = 0
-    max_pos = 0
-    efficiency = 0
 
     if len(stat) <= 0:
         return {
             "pos": avg_pos,
             "distance": max_distance,
-            "time": max_time
+            "time": max_delta_time_from_stick_direction_change
         }
 
     try:
@@ -388,10 +390,17 @@ def calc_max_dist_speed(stat, timestamps):
         for idx, val in enumerate(stat):
             if idx <= 0:
                 continue
-            delta_ms = timestamps[idx] - begin_ms
             delta_before_ms = timestamps[idx] - timestamps[idx - 1]
             delta = stat[idx] - stat[idx - 1]
             cur_distance = abs(stat[idx] - begin_pos)
+
+            cur_stick_direction = 0
+            if stat[idx] < 0:
+                cur_stick_direction = -1
+            else:
+                cur_stick_direction = 1
+
+            delta_time_from_stick_direction_change = timestamps[idx] - time_at_stick_direction_change
 
             cur_direction = 0
             if 0 < delta: #pos before < current pos (small to large) --->
@@ -404,13 +413,11 @@ def calc_max_dist_speed(stat, timestamps):
             if direction == cur_direction or cur_direction == 0:
                 if stat[idx] < 0:
                     sums_of_pos["minus"] += stat[idx] * delta_before_ms
-                    max_pos = stat[idx]
                 else:
                     sums_of_pos["plus"] += stat[idx] * delta_before_ms
-                    max_pos = abs(stat[idx])
 
                 count += 1
-                if max_distance <= cur_distance and delta_ms > 0:
+                if max_distance <= cur_distance and delta_time_from_stick_direction_change > 0:
                     '''
                         strafe left to right and right is larger than 0 (--- 0 -->) or
                         strafe right to left and left is smaller than 0 (<-- 0 ---)
@@ -418,15 +425,14 @@ def calc_max_dist_speed(stat, timestamps):
                     if (0 < direction and begin_pos < 0 and sums_of_pos["plus"] > 0) or \
                        (direction < 0 and 0 < begin_pos and sums_of_pos["minus"] < 0):
                         max_distance = cur_distance
-                        max_time = delta_ms
+                        max_delta_time_from_stick_direction_change = delta_time_from_stick_direction_change
                         if direction == 1: #pos before < current pos (small to large) 0 -->
                             # calculating average pov speed per second
                             # Uses sums of pos only larger than zero because it reflects how good strafe aiming is. ( /// 0 --> )
-                            avg_pos = sums_of_pos["plus"] / max_time
+                            avg_pos = sums_of_pos["plus"] / delta_time_from_stick_direction_change
                         else: #current pos < pos before (large to small) <-- 0
-                            avg_pos = abs(sums_of_pos["minus"] / max_time)
+                            avg_pos = abs(sums_of_pos["minus"] / delta_time_from_stick_direction_change)
 
-                        efficiency = abs(avg_pos / (max_pos / 2))
             else:
                 direction = cur_direction
                 begin_pos = stat[idx]
@@ -434,6 +440,11 @@ def calc_max_dist_speed(stat, timestamps):
                 sums_of_pos["minus"] = 0
                 sums_of_pos["plus"] = 0
                 count = 0
+
+            if last_stick_direction != cur_stick_direction:
+                time_at_stick_direction_change = timestamps[idx]
+                last_stick_direction = cur_stick_direction
+
     except Exception as e:
         #just ignore thread race errors
         print(e)
@@ -442,15 +453,14 @@ def calc_max_dist_speed(stat, timestamps):
     return {
         "avg": avg_pos,
         "distance": max_distance,
-        "time": max_time,
-        "efficiency": efficiency
+        "time": max_delta_time_from_stick_direction_change
     }
 
 def draw_max_dist_speed(screen, font, center_x, center_y, line_dist, stat):
     if "time" not in stat:
         return
 
-    plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/ms, {stat["time"]}ms, {stat["efficiency"] * 100:.0f}%', center = (center_x, center_y))
+    plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/ms, {stat["time"]}ms', center = (center_x, center_y))
     #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
 
 
@@ -719,7 +729,7 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
 def csv_file_header(joystick):
     header = ['ms_from_init', 'timestamp', 'lx', 'ly', 'rx', 'ry', 'lt', 'rt']
     for key in ["lx", "ly", "rx", "ry"]:
-        for second_key in ["time", "distance", "avg", "efficiency"]:
+        for second_key in ["time", "distance", "avg"]:
             header.append(f'{key}.{second_key}')
     
     for i in range(joystick.get_numbuttons()):
@@ -768,7 +778,6 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
         result.append(stats["max"][key]["time"])
         result.append(stats["max"][key]["distance"])
         result.append(stats["max"][key]["avg"])
-        result.append(stats["max"][key]["efficiency"])
 
     for i in range(joystick.get_numbuttons()):
         del stats["buttons"][i][:below_max_index]
@@ -905,12 +914,12 @@ def init_pygame(to_run_func, width, height, transparent, pin_on_top):
             win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | win32con.WS_EX_LAYERED)
             win32gui.SetLayeredWindowAttributes(hwnd, win32api.RGB(*(128, 128, 128)), 0, win32con.LWA_COLORKEY)
             if pin_on_top:
-                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 1920 - width, round(1080 / 2), 0, 0, win32con.SWP_NOSIZE)
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, PIN_ON_TOP_POS[0], PIN_ON_TOP_POS[1], 0, 0, win32con.SWP_NOSIZE)
         else:
             if pin_on_top:
                 screen = pygame.display.set_mode((width, height), pygame.NOFRAME)
                 hwnd = pygame.display.get_wm_info()["window"]
-                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 1920 - width, round(1080 / 2), 0, 0, win32con.SWP_NOSIZE)
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, PIN_ON_TOP_POS[0], PIN_ON_TOP_POS[1], 0, 0, win32con.SWP_NOSIZE)
             else:
                 screen = pygame.display.set_mode((width, height))
 
