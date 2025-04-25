@@ -19,7 +19,7 @@ import csv
 version = "0.3"
 
 # MEASURE Thread FPS
-MEASURE_FRAME_RATE = 120
+MEASURE_FRAME_RATE = 240
 
 # JOYSTICK Step Accuracy, HISTOGRAM BINS for calculating mode
 JOYSTICK_HIST_STEPS = 32
@@ -366,13 +366,14 @@ def calc_max_dist_speed(stat, timestamps):
     direction = 0
     max_distance = 0
     max_time = 0
-    max_count = 0
     count = 0
     sums_of_pos = {
         "minus": 0,
         "plus": 0
     }
     avg_pos = 0
+    max_pos = 0
+    efficiency = 0
 
     if len(stat) <= 0:
         return {
@@ -388,29 +389,44 @@ def calc_max_dist_speed(stat, timestamps):
             if idx <= 0:
                 continue
             delta_ms = timestamps[idx] - begin_ms
+            delta_before_ms = timestamps[idx] - timestamps[idx - 1]
             delta = stat[idx] - stat[idx - 1]
             cur_distance = abs(stat[idx] - begin_pos)
 
             cur_direction = 0
-            if delta < 0:
-                cur_direction = -1
-            elif delta > 0:
+            if 0 < delta: #pos before < current pos (small to large) --->
                 cur_direction = 1
+            elif delta < 0: #current pos < pos before (large to small) <---
+                cur_direction = -1
             else:
                 pass
 
-            if direction == cur_direction:
+            if direction == cur_direction or cur_direction == 0:
                 if stat[idx] < 0:
-                    sums_of_pos["minus"] += stat[idx] * delta
+                    sums_of_pos["minus"] += stat[idx] * delta_before_ms
+                    max_pos = stat[idx]
                 else:
-                    sums_of_pos["plus"] += stat[idx] * delta
+                    sums_of_pos["plus"] += stat[idx] * delta_before_ms
+                    max_pos = abs(stat[idx])
 
                 count += 1
-                if max_distance < cur_distance and delta_ms > 0:
-                    max_distance = cur_distance
-                    max_time = delta_ms
-                    max_count = count
-                    avg_pos = max(abs(sums_of_pos["minus"]), abs(sums_of_pos["plus"])) / max_time * 1000
+                if max_distance <= cur_distance and delta_ms > 0:
+                    '''
+                        strafe left to right and right is larger than 0 (--- 0 -->) or
+                        strafe right to left and left is smaller than 0 (<-- 0 ---)
+                    '''
+                    if (0 < direction and begin_pos < 0 and sums_of_pos["plus"] > 0) or \
+                       (direction < 0 and 0 < begin_pos and sums_of_pos["minus"] < 0):
+                        max_distance = cur_distance
+                        max_time = delta_ms
+                        if direction == 1: #pos before < current pos (small to large) 0 -->
+                            # calculating average pov speed per second
+                            # Uses sums of pos only larger than zero because it reflects how good strafe aiming is. ( /// 0 --> )
+                            avg_pos = sums_of_pos["plus"] / max_time
+                        else: #current pos < pos before (large to small) <-- 0
+                            avg_pos = abs(sums_of_pos["minus"] / max_time)
+
+                        efficiency = abs(avg_pos / (max_pos / 2))
             else:
                 direction = cur_direction
                 begin_pos = stat[idx]
@@ -426,19 +442,16 @@ def calc_max_dist_speed(stat, timestamps):
     return {
         "avg": avg_pos,
         "distance": max_distance,
-        "time": max_time
+        "time": max_time,
+        "efficiency": efficiency
     }
 
 def draw_max_dist_speed(screen, font, center_x, center_y, line_dist, stat):
     if "time" not in stat:
         return
 
-    if stat["time"] > 0:
-        plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/s, {stat["time"]}ms', center = (center_x, center_y))
-        #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
-    else:
-        plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/s, 0ms', center = (center_x, center_y))
-        #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
+    plot_txt(screen, font, f'Avg:{stat["avg"]:.3f}/ms, {stat["time"]}ms, {stat["efficiency"] * 100:.0f}%', center = (center_x, center_y))
+    #plot_txt(screen, font, f'd: {stat["distance"]:.5f}', center = (center_x, center_y + line_dist))
 
 
 def stick_mode_visualize(screen, joystick, stats, stop_event, change_event):
@@ -583,7 +596,7 @@ def stick_mode_visualize(screen, joystick, stats, stop_event, change_event):
         # Sets window reflesh rate to 60FPS
         clock.tick(60)
 
-def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
+def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, is_record):
     """GPSA recorder mode visualize function.
     Main loop of the window drawings.
     Use this with a new Thread.
@@ -617,9 +630,11 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         plot_txt(screen, font_label, 'GPSA by monoru', True, (255, 255, 255), 145, midright = (450, 10))
 
         # draw timestamp
-        cur_ms = pygame.time.get_ticks()
-        plot_txt(screen, font_avg, f'{cur_ms}', midright = (450, 240))
-        plot_txt(screen, font_avg, f'{stats["fps"]:.0f}', topright = (450, 20))
+        if is_record:
+            cur_ms = pygame.time.get_ticks()
+            plot_txt(screen, font_avg, f'{cur_ms}', midright = (450, 240))
+            plot_txt(screen, font_avg, f'{stats["fps"]:.0f}', topright = (450, 20))
+
 
         # Draws history lines of the sticks
         #   LEFT
@@ -628,6 +643,7 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         #   RIGHT
         draw_history_line(screen, stats["rx"], center_right[1] + guide_radius, center_right[0] - guide_radius, guide_radius * 2, 100, True, False)
         draw_history_line(screen, stats["ry"], center_right[1] - guide_radius, center_right[0] + guide_radius, 100, guide_radius * 2, True, True)
+
 
         # Get current positions of the sticks
         lx = fix_stick_val(joystick.get_axis(0))
@@ -641,8 +657,8 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         pygame.draw.circle(screen, (255, 255, 255), left_stick_position, 3)
         plot_txt(screen, font_avg, f'{lx:.5f}', center = (center_left[0], center_left[1] + first_line_dist))
         plot_txt(screen, font_avg, f'{ly:.5f}', center =(center_left[0] + guide_radius + x_first_line_dist, center_left[1]))
-        draw_max_dist_speed(screen, font_avg, center_left[0], center_left[1] + first_line_dist + line_dist, line_dist, stats["max"]["lx"])
-        draw_max_dist_speed(screen, font_avg, center_left[0] + guide_radius + x_first_line_dist, center_left[1] + line_dist, line_dist, stats["max"]["ly"])
+        #draw_max_dist_speed(screen, font_avg, center_left[0], center_left[1] + first_line_dist + line_dist, line_dist, stats["max"]["lx"])
+        #draw_max_dist_speed(screen, font_avg, center_left[0] + guide_radius + x_first_line_dist, center_left[1] + line_dist, line_dist, stats["max"]["ly"])
 
         #   RIGHT
         right_stick_position = (center_right[0] + int(rx * guide_radius), center_right[1] + int(ry * guide_radius))
@@ -650,8 +666,9 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
         plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
         draw_max_dist_speed(screen, font_avg, center_right[0], center_right[1] + first_line_dist + line_dist, line_dist, stats["max"]["rx"])
-        draw_max_dist_speed(screen, font_avg, center_right[0] + guide_radius + x_first_line_dist, center_right[1] + line_dist, line_dist, stats["max"]["ry"])
+        #draw_max_dist_speed(screen, font_avg, center_right[0] + guide_radius + x_first_line_dist, center_right[1] + line_dist, line_dist, stats["max"]["ry"])
 
+ 
         # 1s Sum of Vector Size
         sum_vec_l = 0
         sum_vec_r = 0
@@ -674,9 +691,11 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         l_color = calc_color(sum_vec_l / 100.0)
         r_color = calc_color(sum_vec_r / 100.0)
 
+
         # Comment outed to avoid annoying numbers.
         #plot_txt(screen, font_avg, f'{round(sum_vec_l, 5):.5f}', center = (center_left[0], center_left[1] + first_line_dist + line_dist))
         #plot_txt(screen, font_avg, f'{round(sum_vec_r, 5):.5f}', center = (center_right[0], center_right[1] + first_line_dist + line_dist))
+
 
         # Draws stick circles
         #   RIGHT
@@ -688,11 +707,26 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event):
         pygame.draw.line(screen, (200, 200, 200, 128), (center_left[0] - guide_radius, center_left[1]), (center_left[0] + guide_radius, center_left[1]), 1)
         pygame.draw.line(screen, (200, 200, 200, 128), (center_left[0], center_left[1] - guide_radius), (center_left[0], center_left[1] + guide_radius), 1)
 
+
         # Reflects to the window
         pygame.display.flip()
 
+
         # Sets window reflesh rate to 60FPS
         clock.tick(60)
+
+
+def csv_file_header(joystick):
+    header = ['ms_from_init', 'timestamp', 'lx', 'ly', 'rx', 'ry', 'lt', 'rt']
+    for key in ["lx", "ly", "rx", "ry"]:
+        for second_key in ["time", "distance", "avg", "efficiency"]:
+            header.append(f'{key}.{second_key}')
+    
+    for i in range(joystick.get_numbuttons()):
+        header.append(f'btn.{i}')
+
+    return header
+
 
 def measure_stats(joystick, stats, cur_ms, max_ms):
     below_max_index = -1
@@ -734,6 +768,7 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
         result.append(stats["max"][key]["time"])
         result.append(stats["max"][key]["distance"])
         result.append(stats["max"][key]["avg"])
+        result.append(stats["max"][key]["efficiency"])
 
     for i in range(joystick.get_numbuttons()):
         del stats["buttons"][i][:below_max_index]
@@ -798,6 +833,7 @@ def measure(measure_func, joystick, stats, stop_event, change_event, record = Fa
         filename = dt.strftime("%Y%m%d_%H%M%S_%f.csv")
         with open(filename, 'w') as fd:
             writer = csv.writer(fd)
+            writer.writerow(csv_file_header(joystick))
             measure_main_loop(measure_func, joystick, stats, stop_event, change_event, writer)
     else:
         measure_main_loop(measure_func, joystick, stats, stop_event, change_event)    
@@ -805,7 +841,7 @@ def measure(measure_func, joystick, stats, stop_event, change_event, record = Fa
 def realtime_gui(screen, joystick, stop_event, change_event, stats):
     visualization_thread = None
     
-    visualization_thread = Thread(target=recorder_mode_visualize, args=(screen, joystick, stats, stop_event, change_event))
+    visualization_thread = Thread(target=recorder_mode_visualize, args=(screen, joystick, stats, stop_event, change_event, False))
     visualization_thread.start()
         
     measure(gui_mode_measure, joystick, stats, stop_event, change_event)
@@ -829,7 +865,7 @@ def recorder(screen, joystick, stop_event, change_event, with_gui, stats):
     visualization_thread = None
     
     if with_gui:
-        visualization_thread = Thread(target=recorder_mode_visualize, args=(screen, joystick, stats, stop_event, change_event))
+        visualization_thread = Thread(target=recorder_mode_visualize, args=(screen, joystick, stats, stop_event, change_event, True))
         visualization_thread.start()
         
     measure(recorder_mode_measure, joystick, stats, stop_event, change_event, True)
@@ -847,7 +883,7 @@ def stick_analyzer(screen, joystick, stop_event, change_event, stats):
     measure(stick_mode_measure, joystick, stats, stop_event, change_event)
     visualization_thread.join()
 
-def init_pygame(to_run_func, width, height, transparent):
+def init_pygame(to_run_func, width, height, transparent, pin_on_top):
     stop_event = Event()
     change_event = Event()
     
@@ -861,12 +897,22 @@ def init_pygame(to_run_func, width, height, transparent):
             
         screen = None
         if transparent:
-            screen = pygame.display.set_mode((width, height))#, pygame.NOFRAME)
+            if pin_on_top:
+                screen = pygame.display.set_mode((width, height), pygame.NOFRAME)
+            else:
+                screen = pygame.display.set_mode((width, height))#, pygame.NOFRAME)
             hwnd = pygame.display.get_wm_info()["window"]
             win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | win32con.WS_EX_LAYERED)
             win32gui.SetLayeredWindowAttributes(hwnd, win32api.RGB(*(128, 128, 128)), 0, win32con.LWA_COLORKEY)
+            if pin_on_top:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 1920 - width, round(1080 / 2), 0, 0, win32con.SWP_NOSIZE)
         else:
-            screen = pygame.display.set_mode((width, height))
+            if pin_on_top:
+                screen = pygame.display.set_mode((width, height), pygame.NOFRAME)
+                hwnd = pygame.display.get_wm_info()["window"]
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 1920 - width, round(1080 / 2), 0, 0, win32con.SWP_NOSIZE)
+            else:
+                screen = pygame.display.set_mode((width, height))
 
         pygame.display.set_caption("GPSA: Game Pad Stats Analyzer")
 
@@ -907,6 +953,8 @@ def parse_args():
                     action="store_true")
     parser.add_argument("-r", "--record", help="recorder with gui mode",
                     action="store_true")
+    parser.add_argument("-p", "--pin", help="pin window on top",
+                    action="store_true")
     return parser.parse_args()
 
 def main():
@@ -917,11 +965,11 @@ def main():
     '''
     args = parse_args()
     if args.gui:
-        init_pygame(realtime_gui, 460, 250, True)
+        init_pygame(realtime_gui, 460, 250, True, args.pin)
     elif args.record:
-        init_pygame(recorder_with_gui, 460, 250, True)
+        init_pygame(recorder_with_gui, 460, 250, True, args.pin)
     else:
-        init_pygame(stick_analyzer, 1100, 450, False)
+        init_pygame(stick_analyzer, 1100, 450, False, args.pin)
 
 
 if __name__ == "__main__":
