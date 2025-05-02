@@ -19,7 +19,8 @@ import csv
 version = "0.4"
 
 # MEASURE Thread FPS
-MEASURE_FRAME_RATE = 240
+MEASURE_FRAME_RATE = 1000
+SAMPLING_RATE = 10 #every 10 to 11ms
 
 # JOYSTICK Step Accuracy, HISTOGRAM BINS for calculating mode
 JOYSTICK_HIST_STEPS = 32
@@ -704,19 +705,15 @@ def measure_main_loop(measure_func, joystick, stats, stop_event, change_event, w
 
         # Get the time from pygame.init() called in ms.
         cur_ms = pygame.time.get_ticks()
-        
-        measure_func(joystick, stats, cur_ms, writer)
+
+        if cur_ms - last_ms >= SAMPLING_RATE:
+            measure_func(joystick, stats, cur_ms, writer)
+            # Calculating FPS
+            stats["fps"] = 1000 / (cur_ms - last_ms)
+            last_ms = cur_ms
         
         # Wait until next measure frame
         clock.tick(MEASURE_FRAME_RATE)
-
-        # Calculating FPS
-        if cur_ms - last_ms > 0:
-            stats["fps"] = 1000 / (cur_ms - last_ms)
-        else:
-            stats["fps"] = 0
-
-        last_ms = cur_ms
 
 def measure(measure_func, joystick, stats, stop_event, change_event, record = False):
 
