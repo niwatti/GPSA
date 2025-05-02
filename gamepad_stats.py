@@ -860,8 +860,10 @@ def main():
         init_pygame(realtime_gui, 460, 250, True, args.pin)
     elif args.record:
         init_pygame(recorder_with_gui, 460, 250, True, args.pin)
-    else:
+    elif args.stick:
         init_pygame(stick_analyzer, 1100, 450, False, args.pin)
+    else:
+        init_pygame(realtime_gui, 460, 250, True, True)
 
 
 if __name__ == "__main__":
