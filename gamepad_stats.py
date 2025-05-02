@@ -16,7 +16,7 @@ import numpy as np
 
 import csv
 
-version = "0.3"
+version = "0.4"
 
 # MEASURE Thread FPS
 MEASURE_FRAME_RATE = 240
