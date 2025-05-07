@@ -13,7 +13,7 @@ from colorama import Style
 from threading import Thread, Event
 import math
 import numpy as np
-
+from functools import reduce
 import csv
 
 version = "0.4"
@@ -21,6 +21,10 @@ version = "0.4"
 # MEASURE Thread FPS
 MEASURE_FRAME_RATE = 1000
 SAMPLING_RATE = 10 #every 10 to 11ms
+
+# ANALYZE MAX MSs
+MAX_MS = 1000
+AGGR_MAX_MS = 10000
 
 # JOYSTICK Step Accuracy, HISTOGRAM BINS for calculating mode
 JOYSTICK_HIST_STEPS = 32
@@ -523,6 +527,7 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
     clock = pygame.time.Clock()
     font_label = pygame.font.Font(None, 16)
     font_avg = pygame.font.Font(None, 18)
+    font_max = pygame.font.Font(None, 22)
     center_left = (70, 70)
     center_right = (300, 70)
     guide_radius = 50
@@ -571,6 +576,8 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
         pygame.draw.circle(screen, (255, 255, 255), right_stick_position, 3)
         plot_txt(screen, font_avg, f'{rx:.5f}', center=(center_right[0], center_right[1] + first_line_dist))
         plot_txt(screen, font_avg, f'{ry:.5f}', center=(center_right[0] + guide_radius + x_first_line_dist, center_right[1]))
+        plot_txt(screen, font_avg, f'{stats["max"]["rx"]["last_speed"]:.5f}/ms', center=(center_right[0], center_right[1] + first_line_dist + line_dist))
+        plot_txt(screen, font_max, f'10sMAX, MAX: {max(stats["max"]["rx"]["max_speeds"], default=0):.5f}, {stats["max"]["rx"]["max_speed"]:.5f}/ms', center=(center_right[0], center_right[1] + first_line_dist + line_dist * 2))
 
  
         # 1s Sum of Vector Size
@@ -619,31 +626,185 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
         # Sets window reflesh rate to 60FPS
         clock.tick(60)
 
+ANALYZE_KEYS = ["mvmt_avg", "diff_1", "diff_5", "diff_1_of_5", "diff_1_of_1_of_5", "direction", "big_mvmt", "turned", "sums", "speed", "begin_ms", "end"]
+ANALYZE_AGGR_KEYS = ["last_speed", "max_speed"]
+ANALYZE_AGGR_MS_KEYS = ["max_speeds", "max_speeds_ms"]
 
 def csv_file_header(joystick):
-    header = ['ms_from_init', 'timestamp', 'lx', 'ly', 'rx', 'ry', 'lt', 'rt']
+    header = ['ms_from_init', 'lx', 'ly', 'rx', 'ry', 'lt', 'rt']
     
     for i in range(joystick.get_numbuttons()):
         header.append(f'btn.{i}')
 
+    for key in ['lx', 'ly', 'rx', 'ry']:
+        for key2 in ANALYZE_KEYS:
+            header.append(f'{key}.{key2}')
+
     return header
 
 
-def measure_stats(joystick, stats, cur_ms, max_ms):
-    below_max_index = -1
-    for i in range(len(stats["timestamps"])):
-        if cur_ms - stats["timestamps"][i] <= max_ms:
-            break
-        below_max_index = i
+def analyze_stats(stats):
+    '''Analyzes stats
+    '''
 
-    if below_max_index >= 0:
-        del stats["timestamps"][:below_max_index]
-        del stats["lx"][:below_max_index]
-        del stats["ly"][:below_max_index]
-        del stats["rx"][:below_max_index]
-        del stats["ry"][:below_max_index]
+    i = len(stats["timestamps"]) - 1
+    
+    # needs at least 11 stats
+    if i < 11:
+        for key in ["lx", "ly", "rx", "ry"]:
+            for key2 in ANALYZE_KEYS:
+                stats["max"][key][key2].append(0)
+        return False
 
-    dt = datetime.datetime.now()
+    # analyze target
+    target = i - 5
+
+    for key in ["lx", "ly", "rx", "ry"]:
+        analyze_stick_stats(stats, key, target)
+
+    return True
+
+
+def analyze_stick_stats(stats, key, target):
+
+    stick_stats = stats[key]
+    stick_analyzed_stats = stats["max"][key]
+
+    for key in ANALYZE_KEYS:
+        stick_analyzed_stats[key].append(0)
+
+
+    # calc movement average of 100ms
+    stick_analyzed_stats["mvmt_avg"][target] = reduce(lambda x, y: x + y, stick_stats[target - 5:target + 5], 0) / 11
+
+
+    # 1 if stick moves toward 1, -1 if stick moves toward -1, 0 if stick doesn't move.
+    direction = 0
+    pos_diff_1 = stick_analyzed_stats["mvmt_avg"][target] - stick_analyzed_stats["mvmt_avg"][target - 1]
+    if pos_diff_1 < 0:
+        direction = -1
+    elif pos_diff_1 == 0:
+        direction = 0
+    else:
+        direction = 1
+    stick_analyzed_stats["direction"][target] = direction
+
+
+    # analyzes using stats before
+    stick_analyzed_stats["diff_1"][target] = stick_analyzed_stats["mvmt_avg"][target] - stick_analyzed_stats["mvmt_avg"][target - 1]
+    stick_analyzed_stats["diff_5"][target] = stick_analyzed_stats["mvmt_avg"][target] - stick_analyzed_stats["mvmt_avg"][target - 5]
+    stick_analyzed_stats["diff_1_of_5"][target] = stick_analyzed_stats["diff_5"][target] - stick_analyzed_stats["diff_5"][target - 1]
+    stick_analyzed_stats["diff_1_of_1_of_5"][target] = stick_analyzed_stats["diff_1_of_5"][target] - stick_analyzed_stats["diff_1_of_5"][target - 1]
+
+
+    def is_stick_keep_moved(idx):
+        return abs(stick_analyzed_stats["diff_1_of_1_of_5"][idx]) > 0.015
+
+    def is_stick_accelerated(idx):
+        #return (0 < stick_analyzed_stats["mvmt_avg"][idx] and stick_analyzed_stats["diff_1_of_5"][idx] < -0.01) or\
+        #       (stick_analyzed_stats["mvmt_avg"][idx] < 0 and 0.01 < stick_analyzed_stats["diff_1_of_5"][idx])
+        return abs(stick_analyzed_stats["diff_1_of_5"][idx]) > 0.01
+
+    def is_stick_big_mvmt(idx):
+        return 0.1 < abs(stick_analyzed_stats["diff_5"][idx])
+    
+    def is_stick_direction_changed(idx):
+        return stick_analyzed_stats["direction"][idx - 1] != stick_analyzed_stats["direction"][idx]
+
+    def is_stick_turned(idx):
+        stat = stick_analyzed_stats["mvmt_avg"]
+        stat_before = stat[idx - 1]
+        stat_cur = stat[idx]
+        if (stat_before <= 0 and 0 < stat_cur) or\
+           (0 <= stat_before and stat_cur < 0) or\
+           (stat_before < 0 and 0 <= stat_cur) or\
+           (0 < stat_before and stat_cur <= 0):
+            return True
+        return False
+    
+    def find_begin_and_set_sums(idx):
+        for j in range(idx - 1, 6, -1):
+            if is_stick_accelerated(j):
+                #print("begin_ms:", len(stick_analyzed_stats["begin_ms"]), idx)
+                stick_analyzed_stats["begin_ms"][idx] = stats["timestamps"][j]
+                return True
+        return False
+    
+    def find_end_and_set_sums(idx):
+        begin_ms_index = -1
+        begin_ms = 0
+        for j in range(idx - 1, 6, -1):
+            if stick_analyzed_stats["begin_ms"][j] != 0:
+                begin_ms = stick_analyzed_stats["begin_ms"][j]
+                stick_analyzed_stats["begin_ms"][idx - 1] = begin_ms
+                for k in range(j, 6, -1):
+                    if stats["timestamps"][k] == begin_ms:
+                        begin_ms_index = k
+                        break
+                break
+
+        if begin_ms > 0:
+            for j in range(idx, target + 5):
+
+                if not is_stick_accelerated(j) or not is_stick_keep_moved(j):
+                    end_ms = stats["timestamps"][j]
+                    stick_analyzed_stats["end"][idx - 1] = end_ms
+
+                    if j - 1 - begin_ms_index > 0:
+                        sums = abs(reduce(lambda x, y: abs(x) + abs(y), stick_stats[begin_ms_index:j - 1], 0))
+                        stick_analyzed_stats["sums"][idx - 1] = sums
+
+                        if end_ms - begin_ms > 0:
+                            speed = sums / (end_ms - begin_ms)
+                            stick_analyzed_stats["speed"][idx - 1] = speed
+                            stick_analyzed_stats["last_speed"] = speed
+                            if speed > stick_analyzed_stats["max_speed"]:
+                                stick_analyzed_stats["max_speed"] = speed
+                            stick_analyzed_stats["max_speeds"].append(speed)
+                            stick_analyzed_stats["max_speeds_ms"].append(end_ms)
+
+                    return True
+
+        return False
+
+
+    # check if the current movement is big or not
+    end_big_mvmt = False
+    if stick_analyzed_stats["big_mvmt"][target - 1] == 1:
+        if is_stick_accelerated(target):
+            # continue big movement
+            stick_analyzed_stats["big_mvmt"][target] = 1
+        else:
+            # end big movement
+            stick_analyzed_stats["big_mvmt"][target] = 0
+            end_big_mvmt = True
+
+    elif is_stick_big_mvmt(target) and is_stick_accelerated(target):
+        # new big movement
+
+        # calculate begin point
+        found_begin = find_begin_and_set_sums(target)
+        if found_begin:
+            stick_analyzed_stats["big_mvmt"][target] = 1
+
+
+    if stick_analyzed_stats["big_mvmt"][target] == 1:
+
+        if stick_analyzed_stats["turned"][target - 1] == 1:
+            stick_analyzed_stats["turned"][target] = 1
+
+        elif is_stick_turned(target):
+            # new turn
+            stick_analyzed_stats["turned"][target] = 1
+
+    elif stick_analyzed_stats["turned"][target - 1] == 1 and end_big_mvmt:
+        # finished big mvmt and turn
+        find_end_and_set_sums(target)
+
+    return stick_analyzed_stats
+
+
+def measure_stats(joystick, stats, cur_ms):
     lx = fix_stick_val(joystick.get_axis(0))
     ly = fix_stick_val(joystick.get_axis(1))
     rx = fix_stick_val(joystick.get_axis(2))
@@ -659,32 +820,92 @@ def measure_stats(joystick, stats, cur_ms, max_ms):
     stats["lt"].append(lt)
     stats["rt"].append(rt)
 
-    result = [dt.isoformat(), lx, ly, rx, ry, lt, rt]
-
     for i in range(joystick.get_numbuttons()):
-        del stats["buttons"][i][:below_max_index]
-
         btn_state = joystick.get_button(i)
         if btn_state:
-            result.append(1)
             stats["buttons"][i].append(1)
         else:
-            result.append(0)
             stats["buttons"][i].append(0)
 
-    
-    
-    return result
+
+def delete_lines(joystick, stats, cur_ms, max_ms, aggr_max_ms):
+    lines = []
+
+    below_max_index = -1
+    for i in range(len(stats["timestamps"])):
+        if cur_ms - stats["timestamps"][i] <= max_ms:
+            break
+        below_max_index = i
+
+    #print(len(stats["max"]["lx"]["mvmt_avg"]), len(stats["timestamps"]), below_max_index)
+
+    if below_max_index >= 0:
+        for i in range(0, below_max_index):
+            
+            line = []
+            try:
+                line.append(stats["timestamps"][i])
+                del stats["timestamps"][i]
+            except:
+                pass
+
+            for key in ["lx", "ly", "rx", "ry", "lt", "rt"]:
+                try:
+                    line.append(stats[key][i])
+                    del stats[key][i]
+                except:
+                    pass
+
+            for j in range(joystick.get_numbuttons()):
+                try:
+                    line.append(stats["buttons"][j][i])
+                    del stats["buttons"][j][i]
+                except:
+                    pass
+
+            for key in ["lx", "ly", "rx", "ry"]:
+                for key2 in ANALYZE_KEYS:
+                    if i < len(stats["max"][key][key2]):
+                        try:
+                            line.append(stats["max"][key][key2][i])
+                            del stats["max"][key][key2][i]
+                        except:
+                            pass
+
+            lines.append(line)
+
+    for i in ["lx", "ly", "rx", "ry"]:
+        delete_to = -1
+        for j in range(len(stats["max"][i]["max_speeds_ms"])):
+            old_ms = stats["max"][i]["max_speeds_ms"][j]
+            if cur_ms - old_ms <= aggr_max_ms:
+                break
+            delete_to = j
+        if delete_to >= 0:
+            try:
+                del stats["max"][i]["max_speeds"][:delete_to]
+                del stats["max"][i]["max_speeds_ms"][:delete_to]
+            except:
+                pass
+
+    return lines
+
 
 def recorder_mode_measure(joystick, stats, cur_ms, writer):
-    result = measure_stats(joystick, stats, cur_ms, 1000)
-    writer.writerow([cur_ms, *result])
+    deleted_lines = delete_lines(joystick, stats, cur_ms, MAX_MS, AGGR_MAX_MS)
+    measure_stats(joystick, stats, cur_ms)
+    analyze_stats(stats)
+    for line in deleted_lines:
+        writer.writerow(line)
 
 def gui_mode_measure(joystick, stats, cur_ms, fd):
-    measure_stats(joystick, stats, cur_ms, 1000)
+    delete_lines(joystick, stats, cur_ms, MAX_MS, AGGR_MAX_MS)
+    measure_stats(joystick, stats, cur_ms)
+    analyze_stats(stats)
 
 def stick_mode_measure(joystick, stats, cur_ms, fd):
-    measure_stats(joystick, stats, cur_ms, 10000)
+    delete_lines(joystick, stats, cur_ms, MAX_MS, AGGR_MAX_MS)
+    measure_stats(joystick, stats, cur_ms)
 
 def measure_main_loop(measure_func, joystick, stats, stop_event, change_event, writer = None):
     clock = pygame.time.Clock()
@@ -819,6 +1040,13 @@ def init_pygame(to_run_func, width, height, transparent, pin_on_top):
             "buttons": [],
             "fps": 0
         }
+        for key in ["lx", "ly", "rx", "ry"]:
+            for key2 in ANALYZE_KEYS:
+                stats["max"][key][key2] = []
+            for key2 in ANALYZE_AGGR_KEYS:
+                stats["max"][key][key2] = 0
+            for key2 in ANALYZE_AGGR_MS_KEYS:
+                stats["max"][key][key2] = []
 
         for i in range(joystick.get_numbuttons()):
             stats["buttons"].append([])
