@@ -26,6 +26,11 @@ SAMPLING_RATE = 10 #every 10 to 11ms
 MAX_MS = 1000
 AGGR_MAX_MS = 10000
 
+# ANALYZE THRESHOLDS
+THRESHOLD_STICK_BIG_MOVEMENT = 0.1
+THRESHOLD_STICK_KEEP_MOVING = 0.015
+THRESHOLD_STICK_ACCELERATION = 0.01
+
 # JOYSTICK Step Accuracy, HISTOGRAM BINS for calculating mode
 JOYSTICK_HIST_STEPS = 32
 
@@ -711,15 +716,16 @@ def analyze_stick_stats(stats, key, target):
 
 
     def is_stick_keep_moved(idx):
-        return abs(stick_analyzed_stats["diff_1_of_1_of_5"][idx]) > 0.015
+        threshold = THRESHOLD_STICK_KEEP_MOVING
+        return abs(stick_analyzed_stats["diff_1_of_1_of_5"][idx]) > threshold
 
     def is_stick_accelerated(idx):
         #return (0 < stick_analyzed_stats["mvmt_avg"][idx] and stick_analyzed_stats["diff_1_of_5"][idx] < -0.01) or\
         #       (stick_analyzed_stats["mvmt_avg"][idx] < 0 and 0.01 < stick_analyzed_stats["diff_1_of_5"][idx])
-        return abs(stick_analyzed_stats["diff_1_of_5"][idx]) > 0.01
+        return abs(stick_analyzed_stats["diff_1_of_5"][idx]) > THRESHOLD_STICK_ACCELERATION
 
     def is_stick_big_mvmt(idx):
-        return 0.1 < abs(stick_analyzed_stats["diff_5"][idx])
+        return THRESHOLD_STICK_BIG_MOVEMENT < abs(stick_analyzed_stats["diff_5"][idx])
     
     def is_stick_direction_changed(idx):
         return stick_analyzed_stats["direction"][idx - 1] != stick_analyzed_stats["direction"][idx]
@@ -810,9 +816,16 @@ def analyze_stick_stats(stats, key, target):
     if stick_analyzed_stats["big_mvmt"][target] == 1:
 
         if stick_analyzed_stats["turned"][target - 1] == 1:
-            # continue turn
-            stick_analyzed_stats["turned"][target] = 1
-            stick_analyzed_stats[ANALYZE_COLOR_KEY][target] = HISTORY_LINE_TURNED_COLOR
+            if is_stick_direction_changed(target):
+                # end turn
+                stick_analyzed_stats["big_mvmt"][target] = 0
+                end_big_mvmt = True
+                find_end_and_set_sums(target)
+
+            else:
+                # continue turn
+                stick_analyzed_stats["turned"][target] = 1
+                stick_analyzed_stats[ANALYZE_COLOR_KEY][target] = HISTORY_LINE_TURNED_COLOR
 
         elif is_stick_turned(target):
             # new turn
