@@ -28,8 +28,9 @@ AGGR_MAX_MS = 10000
 
 # ANALYZE THRESHOLDS
 THRESHOLD_STICK_BIG_MOVEMENT = 0.1
-THRESHOLD_STICK_KEEP_MOVING = 0.015
-THRESHOLD_STICK_ACCELERATION = 0.01
+THRESHOLD_STICK_KEEP_MOVING = 0.01
+THRESHOLD_STICK_ACCELERATION = 0.0075
+THRESHOLD_STICK_ACCELERATION_STRICT = 0.01
 
 # JOYSTICK Step Accuracy, HISTOGRAM BINS for calculating mode
 JOYSTICK_HIST_STEPS = 32
@@ -719,10 +720,13 @@ def analyze_stick_stats(stats, key, target):
         threshold = THRESHOLD_STICK_KEEP_MOVING
         return abs(stick_analyzed_stats["diff_1_of_1_of_5"][idx]) > threshold
 
-    def is_stick_accelerated(idx):
+    def is_stick_accelerated(idx, strict = False):
         #return (0 < stick_analyzed_stats["mvmt_avg"][idx] and stick_analyzed_stats["diff_1_of_5"][idx] < -0.01) or\
         #       (stick_analyzed_stats["mvmt_avg"][idx] < 0 and 0.01 < stick_analyzed_stats["diff_1_of_5"][idx])
-        return abs(stick_analyzed_stats["diff_1_of_5"][idx]) > THRESHOLD_STICK_ACCELERATION
+        threshold = THRESHOLD_STICK_ACCELERATION
+        if strict:
+            threshold = THRESHOLD_STICK_ACCELERATION_STRICT
+        return abs(stick_analyzed_stats["diff_1_of_5"][idx]) > threshold
 
     def is_stick_big_mvmt(idx):
         return THRESHOLD_STICK_BIG_MOVEMENT < abs(stick_analyzed_stats["diff_5"][idx])
@@ -743,7 +747,7 @@ def analyze_stick_stats(stats, key, target):
     
     def find_begin_and_set_sums(idx):
         for j in range(idx - 1, 6, -1):
-            if is_stick_accelerated(j):
+            if is_stick_accelerated(j, True):
                 #print("begin_ms:", len(stick_analyzed_stats["begin_ms"]), idx)
                 stick_analyzed_stats["begin_ms"][idx] = stats["timestamps"][j]
                 for k in range(j, idx):
