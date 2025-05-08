@@ -33,6 +33,11 @@ BUTTONS_MAP = {'A': 0, 'B': 1, 'X': 2, 'Y': 3, 'SELECT': 4, 'HOME': 5, 'START': 
 
 PIN_ON_TOP_POS = (1920 - 460, round((1080 + 250)/ 2))
 
+HISTORY_LINE_DEFAULT_COLOR = (200, 200, 200)
+HISTORY_LINE_BIG_MVMT_COLOR = (150, 150, 255)
+HISTORY_LINE_TURNED_COLOR = (150, 255, 150)
+HISTORY_LINE_BIG_TURN_COLOR = (255, 150, 150)
+
 def prepare():
     os.system('cls' if os.name == 'nt' else 'clear')
     os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"    #get key events while the window is not focused
@@ -341,7 +346,7 @@ def draw_history_lines(screen, stat_x, stat_y, center_x, center_y, font, guide_r
     plot_txt(screen, font, f'Y', center=(left - 5, y_top + height / 2))
 
 
-def draw_history_line(screen, stat, top, left, width, height, transparent=False, horizontal=True):
+def draw_history_line(screen, stat, top, left, width, height, transparent=False, horizontal=True, colors = None):
     if len(stat) <= 0:
         return
 
@@ -355,6 +360,7 @@ def draw_history_line(screen, stat, top, left, width, height, transparent=False,
         last_pos = (left + width - ((- stat[0] + 1) / 2) * width, top + height)
 
     # Draw Line
+
     for idx, val in enumerate(stat):
         # idx: 0 -> (count - 1)
         new_pos = (0, 0)
@@ -363,7 +369,11 @@ def draw_history_line(screen, stat, top, left, width, height, transparent=False,
         else:
             new_pos = (left + width - ((-val + 1)/ 2) * width, top + height - (idx / x_count) * height)
 
-        pygame.draw.line(screen, (200, 200, 200), last_pos, new_pos)
+        color = HISTORY_LINE_DEFAULT_COLOR
+        if colors:
+            color = colors[idx]
+
+        pygame.draw.line(screen, color, last_pos, new_pos, 2)
         last_pos = new_pos
 
 def stick_mode_visualize(screen, joystick, stats, stop_event, change_event):
@@ -551,11 +561,11 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
 
         # Draws history lines of the sticks
         #   LEFT
-        draw_history_line(screen, stats["lx"], center_left[1] + guide_radius, center_left[0] - guide_radius, guide_radius * 2, 100, True, False)
-        draw_history_line(screen, stats["ly"], center_left[1] - guide_radius, center_left[0] + guide_radius, 100, guide_radius * 2, True, True)
+        draw_history_line(screen, stats["lx"], center_left[1] + guide_radius, center_left[0] - guide_radius, guide_radius * 2, 100, True, False, colors=stats["max"]["lx"][ANALYZE_COLOR_KEY])
+        draw_history_line(screen, stats["ly"], center_left[1] - guide_radius, center_left[0] + guide_radius, 100, guide_radius * 2, True, True, colors=stats["max"]["ly"][ANALYZE_COLOR_KEY])
         #   RIGHT
-        draw_history_line(screen, stats["rx"], center_right[1] + guide_radius, center_right[0] - guide_radius, guide_radius * 2, 100, True, False)
-        draw_history_line(screen, stats["ry"], center_right[1] - guide_radius, center_right[0] + guide_radius, 100, guide_radius * 2, True, True)
+        draw_history_line(screen, stats["rx"], center_right[1] + guide_radius, center_right[0] - guide_radius, guide_radius * 2, 100, True, False, colors=stats["max"]["rx"][ANALYZE_COLOR_KEY])
+        draw_history_line(screen, stats["ry"], center_right[1] - guide_radius, center_right[0] + guide_radius, 100, guide_radius * 2, True, True, colors=stats["max"]["ry"][ANALYZE_COLOR_KEY])
 
 
         # Get current positions of the sticks
@@ -629,6 +639,7 @@ def recorder_mode_visualize(screen, joystick, stats, stop_event, change_event, i
 ANALYZE_KEYS = ["mvmt_avg", "diff_1", "diff_5", "diff_1_of_5", "diff_1_of_1_of_5", "direction", "big_mvmt", "turned", "sums", "speed", "begin_ms", "end"]
 ANALYZE_AGGR_KEYS = ["last_speed", "max_speed"]
 ANALYZE_AGGR_MS_KEYS = ["max_speeds", "max_speeds_ms"]
+ANALYZE_COLOR_KEY = "colors"
 
 def csv_file_header(joystick):
     header = ['ms_from_init', 'lx', 'ly', 'rx', 'ry', 'lt', 'rt']
@@ -654,6 +665,7 @@ def analyze_stats(stats):
         for key in ["lx", "ly", "rx", "ry"]:
             for key2 in ANALYZE_KEYS:
                 stats["max"][key][key2].append(0)
+            stats["max"][key][ANALYZE_COLOR_KEY].append(HISTORY_LINE_DEFAULT_COLOR)
         return False
 
     # analyze target
@@ -672,6 +684,7 @@ def analyze_stick_stats(stats, key, target):
 
     for key in ANALYZE_KEYS:
         stick_analyzed_stats[key].append(0)
+    stick_analyzed_stats[ANALYZE_COLOR_KEY].append(HISTORY_LINE_DEFAULT_COLOR)
 
 
     # calc movement average of 100ms
@@ -727,6 +740,8 @@ def analyze_stick_stats(stats, key, target):
             if is_stick_accelerated(j):
                 #print("begin_ms:", len(stick_analyzed_stats["begin_ms"]), idx)
                 stick_analyzed_stats["begin_ms"][idx] = stats["timestamps"][j]
+                for k in range(j, idx):
+                    stick_analyzed_stats[ANALYZE_COLOR_KEY][k] = HISTORY_LINE_BIG_MVMT_COLOR
                 return True
         return False
     
@@ -763,6 +778,9 @@ def analyze_stick_stats(stats, key, target):
                             stick_analyzed_stats["max_speeds"].append(speed)
                             stick_analyzed_stats["max_speeds_ms"].append(end_ms)
 
+                            for k in range(begin_ms_index, j - 1):
+                                stick_analyzed_stats[ANALYZE_COLOR_KEY][k] = HISTORY_LINE_BIG_TURN_COLOR
+
                     return True
 
         return False
@@ -774,6 +792,7 @@ def analyze_stick_stats(stats, key, target):
         if is_stick_accelerated(target):
             # continue big movement
             stick_analyzed_stats["big_mvmt"][target] = 1
+            stick_analyzed_stats[ANALYZE_COLOR_KEY][target] = HISTORY_LINE_BIG_MVMT_COLOR
         else:
             # end big movement
             stick_analyzed_stats["big_mvmt"][target] = 0
@@ -791,11 +810,14 @@ def analyze_stick_stats(stats, key, target):
     if stick_analyzed_stats["big_mvmt"][target] == 1:
 
         if stick_analyzed_stats["turned"][target - 1] == 1:
+            # continue turn
             stick_analyzed_stats["turned"][target] = 1
+            stick_analyzed_stats[ANALYZE_COLOR_KEY][target] = HISTORY_LINE_TURNED_COLOR
 
         elif is_stick_turned(target):
             # new turn
             stick_analyzed_stats["turned"][target] = 1
+            stick_analyzed_stats[ANALYZE_COLOR_KEY][target] = HISTORY_LINE_TURNED_COLOR
 
     elif stick_analyzed_stats["turned"][target - 1] == 1 and end_big_mvmt:
         # finished big mvmt and turn
@@ -871,6 +893,7 @@ def delete_lines(joystick, stats, cur_ms, max_ms, aggr_max_ms):
                             del stats["max"][key][key2][i]
                         except:
                             pass
+                del stats["max"][key][ANALYZE_COLOR_KEY][i]
 
             lines.append(line)
 
@@ -1047,6 +1070,7 @@ def init_pygame(to_run_func, width, height, transparent, pin_on_top):
                 stats["max"][key][key2] = 0
             for key2 in ANALYZE_AGGR_MS_KEYS:
                 stats["max"][key][key2] = []
+            stats["max"][key][ANALYZE_COLOR_KEY] = []
 
         for i in range(joystick.get_numbuttons()):
             stats["buttons"].append([])
